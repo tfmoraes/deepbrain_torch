@@ -45,10 +45,13 @@ class HDF5Sequence:
         return int(np.ceil(self.x.shape[0] / self.batch_size))
 
     def __getitem__(self, idx):
-        batch_x = self.x[idx * self.batch_size : (idx + 1) * self.batch_size]
-        batch_y = self.y[idx * self.batch_size : (idx + 1) * self.batch_size]
+        idx_i = idx * self.batch_size
+        idx_e = (idx + 1) * self.batch_size
 
-        random_idx = np.arange(batch_x.shape[0])
+        batch_x = self.x[idx_i: idx_e]
+        batch_y = self.y[idx_i: idx_e]
+
+        random_idx = np.arange(idx_e - idx_i)
         np.random.shuffle(random_idx)
 
         return np.array(batch_x[random_idx]), np.array(batch_y[random_idx])
@@ -68,33 +71,45 @@ def train():
     # print("proportion", prop_fg, prop_bg)
 
     # criterion = nn.BCELoss(weight=torch.from_numpy(np.array((0.1, 0.9))), reduction='mean')
-    criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.1)
+    criterion = nn.BCELoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
     writer = SummaryWriter()
+    writer.add_graph(model, torch.randn(1, SIZE, SIZE, SIZE, 1).to(dev))
     print(f"{len(training_files_gen)=}, {training_files_gen.x.shape[0]=}, {BATCH_SIZE=}")
     # 1/0
+
+    best_loss = 10000
 
     for epoch in range(EPOCHS):
         total_loss = 0
         total_correct = 0
+        total_size = 0
         for i, (img, mask) in enumerate(training_files_gen):
+            total_size += mask.size
+
             img = torch.from_numpy(img).to(dev)
             mask = torch.from_numpy(mask).to(dev)
-            print(f"{img.shape=}, {mask.shape=}")
             mask_pred = model(img)
             loss = criterion(mask_pred, mask)
             print(epoch, i, loss.item())
+
             total_loss += loss.item()
-            # total_correct += get_num_correct(mask_pred, mask)
+            total_correct += torch.sum((mask_pred - mask))**(0.5)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-        writer.add_scalar("Loss", total_loss, epoch)
-        # writer.add_scalar("Correct", total_correct, epoch)
-        # writer.add_scalar("Accuracy", total_correct/ len(training_files_gen), epoch)
+        actual_loss = total_loss / len(training_files_gen)
+        actual_acc = total_correct/ total_size
+        writer.add_scalar("Loss", actual_loss, epoch)
+        writer.add_scalar("Correct", total_correct, epoch)
+        writer.add_scalar("Accuracy", actual_acc, epoch)
+
+        if actual_loss <= best_loss:
+            torch.save(model, "weights.pth")
+            best_loss = actual_loss
 
     writer.flush()
 
