@@ -5,3 +5,8 @@ pyparsing
 torch
 typing-extensions
 tensorboard
+scipy
+scikit-image
+cython
+tqdm
+torchviz

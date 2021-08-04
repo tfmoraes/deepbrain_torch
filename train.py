@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from constants import BATCH_SIZE, EPOCHS, NUM_PATCHES, OVERLAP, SIZE
-from model import DeepBrainModel
+from model import Unet3D
 
 parser = argparse.ArgumentParser()
 
@@ -61,19 +61,19 @@ def get_num_correct(preds, labels):
 
 def train():
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model = DeepBrainModel()
+    model = Unet3D()
     model.to(dev)
     model.eval()
 
     training_files_gen = HDF5Sequence("train_arrays.h5", BATCH_SIZE)
     testing_files_gen = HDF5Sequence("test_arrays.h5", BATCH_SIZE)
-    # prop_bg, prop_fg = training_files_gen.calc_proportions()
-    # print("proportion", prop_fg, prop_bg)
+    prop_bg, prop_fg = training_files_gen.calc_proportions()
+    print("proportion", prop_fg, prop_bg)
 
     # criterion = nn.BCELoss(weight=torch.from_numpy(np.array((0.1, 0.9))), reduction='mean')
-    criterion = nn.BCELoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([2]).to(dev))
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     writer = SummaryWriter()
     writer.add_graph(model, torch.randn(1, SIZE, SIZE, SIZE, 1).to(dev))
     print(f"{len(training_files_gen)=}, {training_files_gen.x.shape[0]=}, {BATCH_SIZE=}")
@@ -86,20 +86,26 @@ def train():
         total_correct = 0
         total_size = 0
         for i, (img, mask) in enumerate(training_files_gen):
-            total_size += mask.size
+            size = mask.size
+            total_size += size
 
             img = torch.from_numpy(img).to(dev)
             mask = torch.from_numpy(mask).to(dev)
             mask_pred = model(img)
             loss = criterion(mask_pred, mask)
-            print(epoch, i, loss.item())
 
             total_loss += loss.item()
-            total_correct += torch.sum((mask_pred - mask))**(0.5)
+            correct = float((torch.sum((mask_pred - mask)**2)**(0.5)).float())
+            total_correct += correct
+
+            print(epoch, i, loss.item(), correct / size)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+
+        scheduler.step(loss)
 
         actual_loss = total_loss / len(training_files_gen)
         actual_acc = total_correct/ total_size
