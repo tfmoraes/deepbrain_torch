@@ -54,7 +54,9 @@ class HDF5Sequence:
         random_idx = np.arange(idx_e - idx_i)
         np.random.shuffle(random_idx)
 
-        return np.array(batch_x[random_idx]), np.array(batch_y[random_idx])
+        batch_x = np.array(batch_x[random_idx]).reshape(-1, 1, SIZE, SIZE, SIZE)
+        batch_y = np.array(batch_y[random_idx]).reshape(-1, 1, SIZE, SIZE, SIZE)
+        return batch_x, batch_y
 
 def get_num_correct(preds, labels):
     return preds.argmax(dim=1).eq(labels).sum().item()
@@ -75,7 +77,7 @@ def train():
     optimizer = optim.Adam(model.parameters(), lr=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     writer = SummaryWriter()
-    writer.add_graph(model, torch.randn(1, SIZE, SIZE, SIZE, 1).to(dev))
+    writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
     print(f"{len(training_files_gen)=}, {training_files_gen.x.shape[0]=}, {BATCH_SIZE=}")
     # 1/0
 
@@ -98,7 +100,7 @@ def train():
             correct = float((torch.sum((mask_pred - mask)**2)**(0.5)).float())
             total_correct += correct
 
-            print(epoch, i, loss.item(), correct / size)
+            print(f"{epoch:03}/{EPOCHS:03} - {i:03}/{len(training_files_gen):03}, {loss.item():03.5f}, {correct / size:03.5f}")
 
             optimizer.zero_grad()
             loss.backward()

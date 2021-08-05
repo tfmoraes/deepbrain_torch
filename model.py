@@ -70,8 +70,6 @@ class Unet3D(nn.Module):
         )
 
     def forward(self, img):
-        img = img.permute(*[0, 4, 1, 2, 3])
-
         enc1 = self.encoder1(img)
         enc2 = self.encoder2(self.pool1(enc1))
         enc3 = self.encoder3(self.pool2(enc2))
@@ -98,6 +96,7 @@ class Unet3D(nn.Module):
         conv = self.conv(dec1)
 
         sigmoid = torch.sigmoid(conv)
+
         return sigmoid
 
     def _block(self, in_channels, features, padding=1, kernel_size=5, name="block"):

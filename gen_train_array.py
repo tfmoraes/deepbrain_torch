@@ -38,19 +38,19 @@ def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
 
     patches_files = []
     # Mirroring
-    for m in range(4):
+    for m in range(2):
         if m == 0:
             image = normalized_image.copy()
             mask = normalized_mask.copy()
-        if m == 1:
-            image = normalized_image[::-1].copy()
-            mask = normalized_mask[::-1].copy()
+        elif m == 1:
+            image = normalized_image[:, :, ::-1].copy()
+            mask = normalized_mask[:, :, ::-1].copy()
         elif m == 2:
             image = normalized_image[:, ::-1, :].copy()
             mask = normalized_mask[:, ::-1, :].copy()
         elif m == 3:
-            image = normalized_image[:, :, ::-1].copy()
-            mask = normalized_mask[:, :, ::-1].copy()
+            image = normalized_image[::-1].copy()
+            mask = normalized_mask[::-1].copy()
 
         for n in range(NUM_ROTS):
             if n == 0:
