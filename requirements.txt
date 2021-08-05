@@ -2,7 +2,7 @@ h5py
 nibabel
 numpy
 pyparsing
-torch
+torch==1.8.1
 typing-extensions
 tensorboard
 scipy

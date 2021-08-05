@@ -1,0 +1,10 @@
+*.git
+*.so
+*.vti
+*.c
+datasets
+runs
+weights
+__pycache__
+build
+*.h5
