@@ -70,15 +70,16 @@ def train():
     training_files_gen = HDF5Sequence("train_arrays.h5", BATCH_SIZE)
     testing_files_gen = HDF5Sequence("test_arrays.h5", BATCH_SIZE)
     prop_bg, prop_fg = training_files_gen.calc_proportions()
-    print("proportion", prop_fg, prop_bg)
+    pos_weight = prop_fg / prop_bg
+    print(f"proportion: {prop_fg}, {prop_bg}, {pos_weight}")
 
     # criterion = nn.BCELoss(weight=torch.from_numpy(np.array((0.1, 0.9))), reduction='mean')
-    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([2]).to(dev))
-    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     writer = SummaryWriter()
     writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
-    print(f"{len(training_files_gen)=}, {training_files_gen.x.shape[0]=}, {BATCH_SIZE=}")
+    print(f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {BATCH_SIZE}")
     # 1/0
 
     best_loss = 10000
