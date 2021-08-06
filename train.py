@@ -67,8 +67,10 @@ def get_num_correct(preds, labels):
 def train():
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = Unet3D()
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
     model.to(dev)
-    model.eval()
+    model.train()
 
     training_files_gen = HDF5Sequence("train_arrays.h5", BATCH_SIZE)
     testing_files_gen = HDF5Sequence("test_arrays.h5", BATCH_SIZE)
@@ -81,7 +83,7 @@ def train():
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     writer = SummaryWriter()
-    writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
+    #writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
     print(f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {BATCH_SIZE}")
     # 1/0
 
