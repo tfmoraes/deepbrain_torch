@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm, trange
 
 from constants import BATCH_SIZE, EPOCHS, NUM_PATCHES, OVERLAP, SIZE
 from model import Unet3D
@@ -48,8 +49,8 @@ class HDF5Sequence:
         idx_i = idx * self.batch_size
         idx_e = (idx + 1) * self.batch_size
 
-        batch_x = self.x[idx_i: idx_e]
-        batch_y = self.y[idx_i: idx_e]
+        batch_x = self.x[idx_i:idx_e]
+        batch_y = self.y[idx_i:idx_e]
 
         random_idx = np.arange(idx_e - idx_i)
         np.random.shuffle(random_idx)
@@ -58,8 +59,10 @@ class HDF5Sequence:
         batch_y = np.array(batch_y[random_idx]).reshape(-1, 1, SIZE, SIZE, SIZE)
         return batch_x, batch_y
 
+
 def get_num_correct(preds, labels):
     return preds.argmax(dim=1).eq(labels).sum().item()
+
 
 def train():
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -84,11 +87,12 @@ def train():
 
     best_loss = 10000
 
-    for epoch in range(EPOCHS):
+    for epoch in tqdm(range(EPOCHS), total=EPOCHS):
         total_loss = 0
         total_correct = 0
         total_size = 0
-        for i, (img, mask) in enumerate(training_files_gen):
+        t = trange(len(training_files_gen))
+        for i, (img, mask) in zip(t, training_files_gen):
             size = mask.size
             total_size += size
 
@@ -98,20 +102,23 @@ def train():
             loss = criterion(mask_pred, mask)
 
             total_loss += loss.item()
-            correct = float((torch.sum((mask_pred - mask)**2)**(0.5)).float())
+            correct = float((torch.sum((mask_pred - mask) ** 2) ** (0.5)).float())
             total_correct += correct
 
-            print(f"{epoch:03}/{EPOCHS:03} - {i:03}/{len(training_files_gen):03}, {loss.item():03.5f}, {correct / size:03.5f}")
+            t.set_postfix(loss=loss.item(), correct=correct / size)
+
+            # print(
+            #     f"{epoch:03}/{EPOCHS:03} - {i:03}/{len(training_files_gen):03}, {loss.item():03.5f}, {correct / size:03.5f}"
+            # )
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-
         scheduler.step(loss)
 
         actual_loss = total_loss / len(training_files_gen)
-        actual_acc = total_correct/ total_size
+        actual_acc = total_correct / total_size
         writer.add_scalar("Loss", actual_loss, epoch)
         writer.add_scalar("Correct", total_correct, epoch)
         writer.add_scalar("Accuracy", actual_acc, epoch)
