@@ -8,9 +8,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
+import nibabel as nb
 
 from constants import BATCH_SIZE, EPOCHS, NUM_PATCHES, OVERLAP, SIZE
 from model import Unet3D
+from segment import brain_segment
 
 parser = argparse.ArgumentParser()
 
@@ -72,6 +74,8 @@ def train():
     model.to(dev)
     model.train()
 
+    image_test = nb.load("datasets/cc359/Original/CC0016_philips_15_55_M.nii.gz").get_fdata()
+
     training_files_gen = HDF5Sequence("train_arrays.h5", BATCH_SIZE)
     testing_files_gen = HDF5Sequence("test_arrays.h5", BATCH_SIZE)
     prop_bg, prop_fg = training_files_gen.calc_proportions()
@@ -83,7 +87,7 @@ def train():
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     writer = SummaryWriter()
-    #writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
+    # writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
     print(f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {BATCH_SIZE}")
     # 1/0
 
@@ -119,11 +123,17 @@ def train():
 
         scheduler.step(loss)
 
+        dz, dy, dx = image_test.shape
+        output_test = brain_segment(image_test, model, dev)
+
         actual_loss = total_loss / len(training_files_gen)
         actual_acc = total_correct / total_size
         writer.add_scalar("Loss", actual_loss, epoch)
         writer.add_scalar("Correct", total_correct, epoch)
         writer.add_scalar("Accuracy", actual_acc, epoch)
+        writer.add_image("View 1", output_test.max(0).reshape(1, dy, dx), epoch)
+        writer.add_image("View 2", output_test.max(1).reshape(1, dz, dx), epoch)
+        writer.add_image("View 3", output_test.max(2).reshape(1, dz, dy), epoch)
 
         if actual_loss <= best_loss:
             torch.save(model, "weights.pth")

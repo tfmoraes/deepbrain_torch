@@ -73,9 +73,7 @@ def predict_patch(sub_image, patch, nn_model, dev, patch_size=SIZE):
     ]
 
 
-def brain_segment(image):
-    dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model = torch.load("weights.pth").to(dev)
+def brain_segment(image, model, dev):
     probability_array = np.zeros_like(image, dtype=np.float32)
     image = image_normalize(image, 0.0, 1.0, output_dtype=np.float32)
     sums = np.zeros_like(image)
@@ -85,7 +83,6 @@ def brain_segment(image):
         sub_mask = predict_patch(sub_image, patch, model, dev, SIZE)
         probability_array[iz:ez, iy:ey, ix:ex] += sub_mask
         sums[iz:ez, iy:ey, ix:ex] += 1
-        print(completion)
 
     probability_array /= sums
     return probability_array
@@ -173,8 +170,10 @@ def main():
     input_file = sys.argv[1]
     nii_data = nb.load(input_file)
     image = nii_data.get_fdata()
+    dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    model = torch.load("weights.pth").to(dev)
     t0 = time.time()
-    probability_array = brain_segment(image)
+    probability_array = brain_segment(image, model, dev)
     t1 = time.time()
     print(f"\n\nTime: {t1 - t0} seconds\n\n")
     image_save(image, "input.vti")
