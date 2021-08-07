@@ -13,6 +13,7 @@ import nibabel as nb
 from constants import BATCH_SIZE, EPOCHS, NUM_PATCHES, OVERLAP, SIZE
 from model import Unet3D
 from segment import brain_segment
+from loss import DiceLoss
 
 parser = argparse.ArgumentParser()
 
@@ -72,7 +73,6 @@ def train():
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model.to(dev)
-    model.train()
 
     image_test = nb.load("datasets/cc359/Original/CC0016_philips_15_55_M.nii.gz").get_fdata()
 
@@ -83,9 +83,9 @@ def train():
     print(f"proportion: {prop_fg}, {prop_bg}, {pos_weight}")
 
     # criterion = nn.BCELoss(weight=torch.from_numpy(np.array((0.1, 0.9))), reduction='mean')
-    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
+    # criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
+    criterion = DiceLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     writer = SummaryWriter()
     # writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
     print(f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {BATCH_SIZE}")
@@ -94,43 +94,54 @@ def train():
     best_loss = 10000
 
     for epoch in tqdm(range(EPOCHS), total=EPOCHS):
-        total_loss = 0
-        total_correct = 0
-        total_size = 0
-        t = trange(len(training_files_gen))
-        for i, (img, mask) in zip(t, training_files_gen):
-            size = mask.size
-            total_size += size
+        losses = {
+            "train": [],
+            "validate": [],
+        }
+        accuracies = {
+            "train": [],
+            "validate": [],
+        }
+        for stage in ("train", "validate"):
+            if stage == "train":
+                model.train()
+                t = trange(len(training_files_gen))
+            else:
+                model.eval()
+                t = trange(len(testing_files_gen))
 
-            img = torch.from_numpy(img).to(dev)
-            mask = torch.from_numpy(mask).to(dev)
-            mask_pred = model(img)
-            loss = criterion(mask_pred, mask)
+            for i, (x, y_true) in zip(t, training_files_gen):
+                x = torch.from_numpy(x).to(dev)
+                y_true = torch.from_numpy(y_true).to(dev)
+                optimizer.zero_grad()
 
-            total_loss += loss.item()
-            correct = float((torch.sum((mask_pred - mask) ** 2) ** (0.5)).float())
-            total_correct += correct
+                with torch.set_grad_enabled(stage == "train"):
+                    y_pred = model(x)
+                    loss = criterion(y_pred, y_true)
+                    accuracy = 100.0 * (torch.mean(1.0 * y_true.eq(y_pred)).item() / y_true.numel())
 
-            t.set_postfix(loss=loss.item(), correct=correct / size)
+                    losses[stage].append(loss.item())
+                    accuracies[stage].append(accuracy)
 
-            # print(
-            #     f"{epoch:03}/{EPOCHS:03} - {i:03}/{len(training_files_gen):03}, {loss.item():03.5f}, {correct / size:03.5f}"
-            # )
+                    t.set_postfix(loss=loss.item(), accuracy=accuracy, stage=stage)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        scheduler.step(loss)
+                    if stage == "train":
+                        loss.backward()
+                        optimizer.step()
 
         dz, dy, dx = image_test.shape
         output_test = brain_segment(image_test, model, dev)
+        print("Min max", output_test.min(), output_test.max())
+        output_test = (output_test > 0.75) * 255
 
-        actual_loss = total_loss / len(training_files_gen)
-        actual_acc = total_correct / total_size
-        writer.add_scalar("Loss", actual_loss, epoch)
-        writer.add_scalar("Correct", total_correct, epoch)
-        writer.add_scalar("Accuracy", actual_acc, epoch)
+        actual_loss = np.mean(losses["train"])
+
+        writer.add_scalar("Loss train", actual_loss, epoch)
+        writer.add_scalar("Accuracy train", np.mean(accuracies["train"]), epoch)
+
+        writer.add_scalar("Loss validation", np.mean(losses["validate"]), epoch)
+        writer.add_scalar("Accuracy validation", np.mean(accuracies["validate"]), epoch)
+
         writer.add_image("View 1", output_test.max(0).reshape(1, dy, dx), epoch)
         writer.add_image("View 2", output_test.max(1).reshape(1, dz, dx), epoch)
         writer.add_image("View 3", output_test.max(2).reshape(1, dz, dy), epoch)
