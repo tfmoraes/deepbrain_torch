@@ -13,7 +13,7 @@ import nibabel as nb
 from constants import BATCH_SIZE, EPOCHS, NUM_PATCHES, OVERLAP, SIZE
 from model import Unet3D
 from segment import brain_segment
-from loss import DiceLoss
+from loss import DiceLoss, DiceBCELoss
 
 parser = argparse.ArgumentParser()
 
@@ -84,7 +84,7 @@ def train():
 
     # criterion = nn.BCELoss(weight=torch.from_numpy(np.array((0.1, 0.9))), reduction='mean')
     # criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
-    criterion = DiceLoss()
+    criterion = DiceBCELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     writer = SummaryWriter()
     # writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
