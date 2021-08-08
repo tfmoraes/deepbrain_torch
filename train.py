@@ -118,7 +118,7 @@ def train():
                 with torch.set_grad_enabled(stage == "train"):
                     y_pred = model(x)
                     loss = criterion(y_pred, y_true)
-                    accuracy = 100.0 * (torch.mean(1.0 * y_true.eq(y_pred)).item() / y_true.numel())
+                    accuracy = 100.0 * (torch.sum(1.0 * y_true.eq(y_pred)).item() / y_true.numel())
 
                     losses[stage].append(loss.item())
                     accuracies[stage].append(accuracy)
