@@ -118,7 +118,7 @@ def train():
                 with torch.set_grad_enabled(stage == "train"):
                     y_pred = model(x)
                     loss = criterion(y_pred, y_true)
-                    accuracy = 100.0 * (torch.sum(1.0 * y_true.eq(y_pred)).item() / y_true.numel())
+                    accuracy = 100.0 * (torch.sum(y_true * y_pred).item() / y_true.numel())
 
                     losses[stage].append(loss.item())
                     accuracies[stage].append(accuracy)
@@ -132,7 +132,7 @@ def train():
         dz, dy, dx = image_test.shape
         output_test = brain_segment(image_test, model, dev)
         print("Min max", output_test.min(), output_test.max())
-        output_test = (output_test > 0.75) * 255
+        output_test = (output_test > 0.75) * 1.0
 
         actual_loss = np.mean(losses["train"])
 
