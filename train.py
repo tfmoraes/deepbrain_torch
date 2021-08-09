@@ -124,8 +124,7 @@ class HDF5Sequence:
         return 1.0 - (sum_bg / self.y.size), 1.0 - (sum_fg / self.y.size)
 
     def __len__(self):
-        return 1
-        #return int(np.ceil(self.x.shape[0] / self.batch_size))
+        return int(np.ceil(self.x.shape[0] / self.batch_size))
 
     def __getitem__(self, idx):
         idx_i = idx * self.batch_size
