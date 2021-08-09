@@ -191,5 +191,8 @@ Sessionx.vim
 *.pth
 *.png
 *.h5
-run
+*.vti
+runs
 datasets
+weights
+checkpoints
