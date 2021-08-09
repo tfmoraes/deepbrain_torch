@@ -1,26 +1,96 @@
 import argparse
 import pathlib
+import shutil
 
 import h5py
+import nibabel as nb
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
-import nibabel as nb
 
-from constants import BATCH_SIZE, EPOCHS, NUM_PATCHES, OVERLAP, SIZE
+from constants import SIZE
+from loss import DiceBCELoss, DiceLoss
 from model import Unet3D
 from segment import brain_segment
-from loss import DiceLoss, DiceBCELoss
 
 parser = argparse.ArgumentParser()
-
-parser.add_argument("--gpu", action="store_true", help="use gpu", dest="use_gpu")
-parser.add_argument("-c", "--continue", action="store_true", dest="continue_train")
-parser.add_argument("-b", "--backend", help="Backend", dest="backend")
+parser.add_argument(
+    "-d",
+    "--device",
+    default="",
+    type=str,
+    help="Which device to use: cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan",
+    dest="device",
+)
+parser.add_argument(
+    "-e",
+    "--epochs",
+    default=200,
+    type=int,
+    metavar="N",
+    help="number of total epochs to run",
+)
+parser.add_argument(
+    "-c",
+    "--continue",
+    help="Resume training",
+    action="store_true",
+    dest="continue_train",
+)
+parser.add_argument(
+    "-b",
+    "--batch-size",
+    default=26,
+    type=int,
+    metavar="N",
+    help="Batch size"
+)
+parser.add_argument(
+    "--lr",
+    "--learning-rate",
+    default=0.001,
+    type=float,
+    metavar="LR",
+    help="Learning rate",
+    dest="lr",
+)
 args, _ = parser.parse_known_args()
+
+
+def save_checkpoint(
+    epoch: int,
+    model: nn.Module,
+    optimizer: nn.Module,
+    best_loss: float,
+    is_best: bool = False
+):
+    checkpoint = {
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "best_loss": best_loss,
+    }
+    f_path = pathlib.Path("checkpoints/checkpoint.pt").resolve()
+    f_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, str(f_path))
+    if is_best:
+        f_path_best_weight = pathlib.Path(f"weights/weight_{epoch:03}.pt").resolve()
+        f_path_best_weight.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f_path, f_path_best_weight)
+        print("Is best")
+
+
+def load_checkpoint(model: nn.Module, optimizer: nn.Module):
+    f_path = pathlib.Path("checkpoints/checkpoint.pt").resolve()
+    checkpoint = torch.load(str(f_path))
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    epoch = checkpoint["epoch"]
+    best_loss = checkpoint["best_loss"]
+    return epoch, model, optimizer, best_loss
 
 
 def calc_proportions(masks):
@@ -31,6 +101,14 @@ def calc_proportions(masks):
         sum_fg += (m >= 0.5).sum()
 
     return 1.0 - (sum_bg / masks.size), 1.0 - (sum_fg / masks.size)
+
+
+def calc_accuracy(y_pred, y_true):
+    with torch.no_grad():
+        y_pred = y_pred >= 0.5
+        y_true = y_true >= 0.5
+        acc = y_pred.eq(y_true).sum().item() / y_true.numel()
+        return acc
 
 
 class HDF5Sequence:
@@ -46,7 +124,8 @@ class HDF5Sequence:
         return 1.0 - (sum_bg / self.y.size), 1.0 - (sum_fg / self.y.size)
 
     def __len__(self):
-        return int(np.ceil(self.x.shape[0] / self.batch_size))
+        return 1
+        #return int(np.ceil(self.x.shape[0] / self.batch_size))
 
     def __getitem__(self, idx):
         idx_i = idx * self.batch_size
@@ -68,32 +147,47 @@ def get_num_correct(preds, labels):
 
 
 def train():
-    dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if args.device:
+        dev = torch.device(args.device)
+    else:
+        dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
     model = Unet3D()
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model.to(dev)
 
-    image_test = nb.load("datasets/cc359/Original/CC0016_philips_15_55_M.nii.gz").get_fdata()
+    image_test = nb.load(
+        "datasets/cc359/Original/CC0016_philips_15_55_M.nii.gz"
+    ).get_fdata()
 
-    training_files_gen = HDF5Sequence("train_arrays.h5", BATCH_SIZE)
-    testing_files_gen = HDF5Sequence("test_arrays.h5", BATCH_SIZE)
+    criterion = DiceBCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    if args.continue_train:
+        epoch, model, optimizer, best_loss = load_checkpoint(model, optimizer)
+        start_epoch = epoch + 1
+    else:
+        start_epoch = 0
+        best_loss = 100000
+
+    training_files_gen = HDF5Sequence("train_arrays.h5", args.batch_size)
+    testing_files_gen = HDF5Sequence("test_arrays.h5", args.batch_size)
     prop_bg, prop_fg = training_files_gen.calc_proportions()
     pos_weight = prop_fg / prop_bg
+
     print(f"proportion: {prop_fg}, {prop_bg}, {pos_weight}")
 
     # criterion = nn.BCELoss(weight=torch.from_numpy(np.array((0.1, 0.9))), reduction='mean')
     # criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
-    criterion = DiceBCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
     writer = SummaryWriter()
     # writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
-    print(f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {BATCH_SIZE}")
+    print(
+        f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {args.batch_size}"
+    )
     # 1/0
 
-    best_loss = 10000
-
-    for epoch in tqdm(range(EPOCHS), total=EPOCHS):
+    for epoch in trange(start_epoch, args.epochs):
         losses = {
             "train": [],
             "validate": [],
@@ -118,7 +212,7 @@ def train():
                 with torch.set_grad_enabled(stage == "train"):
                     y_pred = model(x)
                     loss = criterion(y_pred, y_true)
-                    accuracy = 100.0 * (torch.sum(y_true * y_pred).item() / y_true.numel())
+                    accuracy = 100 * calc_accuracy(y_pred, y_true)
 
                     losses[stage].append(loss.item())
                     accuracies[stage].append(accuracy)
@@ -147,8 +241,10 @@ def train():
         writer.add_image("View 3", output_test.max(2).reshape(1, dz, dy), epoch)
 
         if actual_loss <= best_loss:
-            torch.save(model, "weights.pth")
             best_loss = actual_loss
+            is_best = True
+
+        save_checkpoint(epoch, model, optimizer, best_loss, is_best=actual_loss==best_loss)
 
     writer.flush()
 
