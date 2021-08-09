@@ -1,6 +1,7 @@
 import argparse
 import pathlib
 import shutil
+import typing
 
 import h5py
 import nibabel as nb
@@ -80,10 +81,9 @@ def save_checkpoint(
         f_path_best_weight = pathlib.Path(f"weights/weight_{epoch:03}.pt").resolve()
         f_path_best_weight.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(f_path, f_path_best_weight)
-        print("Is best")
 
 
-def load_checkpoint(model: nn.Module, optimizer: nn.Module):
+def load_checkpoint(model: nn.Module, optimizer: nn.Module) -> typing.Tuple[int, nn.Module, nn.Module, float]:
     f_path = pathlib.Path("checkpoints/checkpoint.pt").resolve()
     checkpoint = torch.load(str(f_path))
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -93,17 +93,7 @@ def load_checkpoint(model: nn.Module, optimizer: nn.Module):
     return epoch, model, optimizer, best_loss
 
 
-def calc_proportions(masks):
-    sum_bg = 0.0
-    sum_fg = 0.0
-    for m in masks:
-        sum_bg += (m < 0.5).sum()
-        sum_fg += (m >= 0.5).sum()
-
-    return 1.0 - (sum_bg / masks.size), 1.0 - (sum_fg / masks.size)
-
-
-def calc_accuracy(y_pred, y_true):
+def calc_accuracy(y_pred: torch.Tensor, y_true: torch.Tensor) -> float:
     with torch.no_grad():
         y_pred = y_pred >= 0.5
         y_true = y_true >= 0.5
@@ -112,21 +102,21 @@ def calc_accuracy(y_pred, y_true):
 
 
 class HDF5Sequence:
-    def __init__(self, filename, batch_size):
+    def __init__(self, filename: str, batch_size: int):
         self.f_array = h5py.File(filename, "r")
         self.x = self.f_array["images"]
         self.y = self.f_array["masks"]
         self.batch_size = batch_size
 
-    def calc_proportions(self):
+    def calc_proportions(self) -> typing.Tuple[float, float]:
         sum_bg = self.f_array["bg"][()]
         sum_fg = self.f_array["fg"][()]
         return 1.0 - (sum_bg / self.y.size), 1.0 - (sum_fg / self.y.size)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return int(np.ceil(self.x.shape[0] / self.batch_size))
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> typing.Tuple[np.ndarray, np.ndarray]:
         idx_i = idx * self.batch_size
         idx_e = (idx + 1) * self.batch_size
 
@@ -140,9 +130,6 @@ class HDF5Sequence:
         batch_y = np.array(batch_y[random_idx]).reshape(-1, 1, SIZE, SIZE, SIZE)
         return batch_x, batch_y
 
-
-def get_num_correct(preds, labels):
-    return preds.argmax(dim=1).eq(labels).sum().item()
 
 
 def train():
@@ -241,7 +228,6 @@ def train():
 
         if actual_loss <= best_loss:
             best_loss = actual_loss
-            is_best = True
 
         save_checkpoint(epoch, model, optimizer, best_loss, is_best=actual_loss==best_loss)
 
