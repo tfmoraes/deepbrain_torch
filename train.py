@@ -64,9 +64,9 @@ args, _ = parser.parse_known_args()
 def save_checkpoint(
     epoch: int,
     model: nn.Module,
-    optimizer: nn.Module,
+    optimizer: optim.Optimizer,
     best_loss: float,
-    is_best: bool = False
+    is_best: bool = False,
 ):
     checkpoint = {
         "epoch": epoch,
@@ -83,7 +83,9 @@ def save_checkpoint(
         shutil.copyfile(f_path, f_path_best_weight)
 
 
-def load_checkpoint(model: nn.Module, optimizer: nn.Module) -> typing.Tuple[int, nn.Module, nn.Module, float]:
+def load_checkpoint(
+    model: nn.Module, optimizer: optim.Optimizer
+) -> typing.Tuple[int, nn.Module, optim.Optimizer, float]:
     f_path = pathlib.Path("checkpoints/checkpoint.pt").resolve()
     checkpoint = torch.load(str(f_path))
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -129,7 +131,6 @@ class HDF5Sequence:
         batch_x = np.array(batch_x[random_idx]).reshape(-1, 1, SIZE, SIZE, SIZE)
         batch_y = np.array(batch_y[random_idx]).reshape(-1, 1, SIZE, SIZE, SIZE)
         return batch_x, batch_y
-
 
 
 def train():
@@ -229,7 +230,9 @@ def train():
         if actual_loss <= best_loss:
             best_loss = actual_loss
 
-        save_checkpoint(epoch, model, optimizer, best_loss, is_best=actual_loss==best_loss)
+        save_checkpoint(
+            epoch, model, optimizer, best_loss, is_best=actual_loss == best_loss
+        )
 
     writer.flush()
 
