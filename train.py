@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 from constants import SIZE
-from loss import DiceBCELoss, DiceLoss
+from loss import DiceBCELoss, DiceLoss, TverskyLoss
 from model import Unet3D
 from segment import brain_segment
 
@@ -148,7 +148,7 @@ def train():
         "datasets/cc359/Original/CC0016_philips_15_55_M.nii.gz"
     ).get_fdata()
 
-    criterion = DiceBCELoss()
+    criterion = TverskyLoss(apply_sigmoid=True)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     if args.continue_train:
         epoch, model, optimizer, best_loss = load_checkpoint(model, optimizer)
