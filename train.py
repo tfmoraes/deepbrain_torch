@@ -17,7 +17,7 @@ from loss import DiceBCELoss, DiceLoss, TverskyLoss
 from model import Unet3D
 from segment import brain_segment
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument(
     "-d",
     "--device",
@@ -57,6 +57,14 @@ parser.add_argument(
     metavar="LR",
     help="Learning rate",
     dest="lr",
+)
+parser.add_argument(
+    "--early-stop",
+    default=0,
+    type=int,
+    metavar="N",
+    help="Number of epochs of no improvement to early stop. If 0 then early-stop is not activated.",
+    dest="early_stop",
 )
 args, _ = parser.parse_known_args()
 
@@ -174,6 +182,7 @@ def train():
     )
     # 1/0
 
+    epochs_no_improve = 0
     for epoch in trange(start_epoch, args.epochs):
         losses = {
             "train": [],
@@ -229,10 +238,17 @@ def train():
 
         if actual_loss <= best_loss:
             best_loss = actual_loss
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
 
         save_checkpoint(
             epoch, model, optimizer, best_loss, is_best=actual_loss == best_loss
         )
+
+        if args.early_stop > 0 and epochs_no_improve == args.early_stop:
+            print("Early-stop!")
+            break
 
     writer.flush()
 

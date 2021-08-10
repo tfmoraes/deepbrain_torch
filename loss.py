@@ -80,7 +80,7 @@ class IoULoss(nn.Module):
 
 class TverskyLoss(nn.Module):
     # This loss was introduced in "Tversky loss function for image
-    # segmentationusing 3D fully convolutional deep networks", retrievable here:
+    # segmentation using 3D fully convolutional deep networks", retrievable here:
     # https://arxiv.org/abs/1706.05721. It was designed to optimise segmentation on
     # imbalanced medical datasets by utilising constants that can adjust how
     # harshly different types of error are penalised in the loss function. From the
