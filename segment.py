@@ -52,7 +52,6 @@ parser.add_argument(
     dest="device",
 )
 
-args, _ = parser.parse_known_args()
 
 
 def image_normalize(
@@ -214,6 +213,7 @@ def image_save(image: np.ndarray, filename: str):
 
 
 def main():
+    args, _ = parser.parse_known_args()
     input_file = args.input_file
     weights_file = args.weights
     output_file = args.output_file
