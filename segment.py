@@ -2,16 +2,57 @@ import itertools
 import sys
 import time
 import typing
+import argparse
+import pathlib
 
 import nibabel as nb
 import numpy as np
 import torch
 import vtk
-from tqdm import tqdm, trange
+from tqdm import tqdm
 from vtk.util import numpy_support
 
 from constants import BATCH_SIZE, OVERLAP, SIZE
 from model import Unet3D
+
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument(
+    "-w",
+    "--weights",
+    type=pathlib.Path,
+    metavar="path",
+    help="Weight path",
+    dest="weights",
+    required=True,
+)
+parser.add_argument(
+    "-i",
+    "--input",
+    type=pathlib.Path,
+    metavar="path",
+    help="Nifti input file",
+    dest="input_file",
+    required=True,
+)
+parser.add_argument(
+    "-o",
+    "--output",
+    default="output.vti",
+    type=pathlib.Path,
+    metavar="path",
+    help="VTI output file",
+    dest="output_file",
+)
+parser.add_argument(
+    "-d",
+    "--device",
+    default="",
+    type=str,
+    help="Which device to use: cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan",
+    dest="device",
+)
+
+args, _ = parser.parse_known_args()
 
 
 def image_normalize(
@@ -173,17 +214,26 @@ def image_save(image: np.ndarray, filename: str):
 
 
 def main():
-    input_file = sys.argv[1]
-    nii_data = nb.load(input_file)
+    input_file = args.input_file
+    weights_file = args.weights
+    output_file = args.output_file
+    if args.device:
+        dev = torch.device(args.device)
+    else:
+        dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    nii_data = nb.load(str(input_file))
     image = nii_data.get_fdata()
-    dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = Unet3D()
-    checkpoint = torch.load("weights/weight_026.pt")
-    model.load_state_dict(checkpoint["model_state_dict"])
+    checkpoint = torch.load(weights_file)
+    try:
+        model.load_state_dict(checkpoint["model_state_dict"])
+    except TypeError:
+        model = checkpoint
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
     model = model.to(dev)
     probability_array = brain_segment(image, model, dev)
-    image_save(image, "input.vti")
-    image_save(probability_array, "output.vti")
+    image_save(probability_array, str(output_file))
 
 
 if __name__ == "__main__":
