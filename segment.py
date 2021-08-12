@@ -1,101 +1,105 @@
 import itertools
 import sys
 import time
+import typing
 
 import nibabel as nb
 import numpy as np
-import vtk
 import torch
+import vtk
 from vtk.util import numpy_support
 
-SIZE = 48
-OVERLAP = SIZE // 2 + 1
+from constants import BATCH_SIZE, OVERLAP, SIZE
+from model import Unet3D
 
 
-def image_normalize(image, min_=0.0, max_=1.0, output_dtype=np.int16):
+def image_normalize(
+    image: np.ndarray,
+    min_: float = 0.0,
+    max_: float = 1.0,
+    output_dtype: np.dtype = np.int16,
+) -> np.ndarray:
     output = np.empty(shape=image.shape, dtype=output_dtype)
     imin, imax = image.min(), image.max()
     output[:] = (image - imin) * ((max_ - min_) / (imax - imin)) + min_
     return output
 
 
-def get_LUT_value(data, window, level):
-    shape = data.shape
-    data_ = data.ravel()
-    data = np.piecewise(
-        data_,
-        [
-            data_ <= (level - 0.5 - (window - 1) / 2),
-            data_ > (level - 0.5 + (window - 1) / 2),
-        ],
-        [
-            0,
-            window,
-            lambda data_: ((data_ - (level - 0.5)) / (window - 1) + 0.5) * (window),
-        ],
-    )
-    data.shape = shape
-    return data
-
-
-def gen_patches(image, patch_size, overlap):
+def gen_patches(
+    image: np.ndarray, patch_size: int, overlap: int, batch_size: int = BATCH_SIZE
+) -> typing.Iterator[typing.Tuple[float, np.ndarray, typing.Iterable]]:
     sz, sy, sx = image.shape
     i_cuts = list(
         itertools.product(
-            range(0, sz, patch_size - OVERLAP),
-            range(0, sy, patch_size - OVERLAP),
-            range(0, sx, patch_size - OVERLAP),
+            range(0, sz - patch_size, patch_size - overlap),
+            range(0, sy - patch_size, patch_size - overlap),
+            range(0, sx - patch_size, patch_size - overlap),
         )
     )
-    sub_image = np.empty(shape=(patch_size, patch_size, patch_size), dtype="float32")
+    patches = []
+    indexes = []
     for idx, (iz, iy, ix) in enumerate(i_cuts):
-        sub_image[:] = 0
-        _sub_image = image[
-            iz : iz + patch_size, iy : iy + patch_size, ix : ix + patch_size
-        ]
-        sz, sy, sx = _sub_image.shape
-        sub_image[0:sz, 0:sy, 0:sx] = _sub_image
-        ez = iz + sz
-        ey = iy + sy
-        ex = ix + sx
-
-        yield (idx + 1.0) / len(i_cuts), sub_image, ((iz, ez), (iy, ey), (ix, ex))
-
-
-def predict_patch(sub_image, patch, nn_model, dev, patch_size=SIZE):
-    (iz, ez), (iy, ey), (ix, ex) = patch
-    with torch.no_grad():
-        sub_mask = nn_model(
-            torch.from_numpy(sub_image.reshape(1, 1, patch_size, patch_size, patch_size)).to(dev)
-        )
-    return sub_mask.cpu().numpy().reshape(patch_size, patch_size, patch_size)[
-        0 : ez - iz, 0 : ey - iy, 0 : ex - ix
-    ]
+        ez = iz + patch_size
+        ey = iy + patch_size
+        ex = ix + patch_size
+        patch = image[iz:ez, iy:ey, ix:ex]
+        patches.append(patch)
+        indexes.append(((iz, ez), (iy, ey), (ix, ex)))
+        if len(patches) == batch_size:
+            yield (idx + 1.0) / len(i_cuts), np.asarray(patches), indexes
+            patches = []
+            indexes = []
+    if patches:
+        yield 1.0, np.asarray(patches), indexes
 
 
-def brain_segment(image, model, dev):
-    probability_array = np.zeros_like(image, dtype=np.float32)
+def pad_image(image: np.ndarray, patch_size: int = SIZE) -> np.ndarray:
+    sz, sy, sx = image.shape
+    pad_z = int(np.ceil(sz / patch_size) * patch_size) - sz + OVERLAP
+    pad_y = int(np.ceil(sy / patch_size) * patch_size) - sy + OVERLAP
+    pad_x = int(np.ceil(sx / patch_size) * patch_size) - sx + OVERLAP
+    padded_image = np.pad(image, ((0, pad_z), (0, pad_y), (0, pad_x)))
+    print(f"{padded_image.shape=}, {image.shape=}")
+    return padded_image
+
+
+def brain_segment(
+    image: np.ndarray, model: torch.nn.Module, dev: torch.device
+) -> np.ndarray:
+    dz, dy, dx = image.shape
     image = image_normalize(image, 0.0, 1.0, output_dtype=np.float32)
-    sums = np.zeros_like(image)
+    padded_image = pad_image(image, SIZE)
+    probability_array = np.zeros_like(padded_image, dtype=np.float32)
+    sums = np.zeros_like(padded_image)
     # segmenting by patches
-    for completion, sub_image, patch in gen_patches(image, SIZE, OVERLAP):
-        (iz, ez), (iy, ey), (ix, ex) = patch
-        sub_mask = predict_patch(sub_image, patch, model, dev, SIZE)
-        probability_array[iz:ez, iy:ey, ix:ex] += sub_mask
-        sums[iz:ez, iy:ey, ix:ex] += 1
+    for completion, patches, indexes in gen_patches(
+        padded_image, SIZE, OVERLAP, BATCH_SIZE
+    ):
+        with torch.no_grad():
+            pred = (
+                model(
+                    torch.from_numpy(patches.reshape(-1, 1, SIZE, SIZE, SIZE)).to(dev)
+                )
+                .cpu()
+                .numpy()
+            )
+        for i, ((iz, ez), (iy, ey), (ix, ex)) in enumerate(indexes):
+            probability_array[iz:ez, iy:ey, ix:ex] += pred[i, 0]
+            sums[iz:ez, iy:ey, ix:ex] += 1
+        print(completion)
 
     probability_array /= sums
-    return probability_array
+    return np.array(probability_array[:dz, :dy, :dx])
 
 
 def to_vtk(
-    n_array,
-    spacing=(1.0, 1.0, 1.0),
-    slice_number=0,
-    orientation="AXIAL",
-    origin=(0, 0, 0),
-    padding=(0, 0, 0),
-):
+    n_array: np.ndarray,
+    spacing: typing.Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    slice_number: int = 0,
+    orientation: str = "AXIAL",
+    origin: typing.Tuple[float, float, float] = (0, 0, 0),
+    padding: typing.Tuple[float, float, float] = (0, 0, 0),
+) -> vtk.vtkImageData:
     if orientation == "SAGITTAL":
         orientation = "SAGITAL"
 
@@ -171,14 +175,16 @@ def main():
     nii_data = nb.load(input_file)
     image = nii_data.get_fdata()
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model = torch.load("weights.pth").to(dev)
+    model = Unet3D()
+    checkpoint = torch.load("weights/weight_026.pt")
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model = model.to(dev)
     t0 = time.time()
     probability_array = brain_segment(image, model, dev)
     t1 = time.time()
     print(f"\n\nTime: {t1 - t0} seconds\n\n")
     image_save(image, "input.vti")
     image_save(probability_array, "output.vti")
-
 
 
 if __name__ == "__main__":

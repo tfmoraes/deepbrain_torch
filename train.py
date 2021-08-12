@@ -156,7 +156,7 @@ def train():
         "datasets/cc359/Original/CC0016_philips_15_55_M.nii.gz"
     ).get_fdata()
 
-    criterion = TverskyLoss(apply_sigmoid=True)
+    criterion = TverskyLoss(apply_sigmoid=False)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     if args.continue_train:
         epoch, model, optimizer, best_loss = load_checkpoint(model, optimizer)
