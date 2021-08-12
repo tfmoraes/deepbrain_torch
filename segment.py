@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import vtk
 from vtk.util import numpy_support
+from tqdm import tqdm, trange
 
 from constants import BATCH_SIZE, OVERLAP, SIZE
 from model import Unet3D
@@ -59,7 +60,6 @@ def pad_image(image: np.ndarray, patch_size: int = SIZE) -> np.ndarray:
     pad_y = int(np.ceil(sy / patch_size) * patch_size) - sy + OVERLAP
     pad_x = int(np.ceil(sx / patch_size) * patch_size) - sx + OVERLAP
     padded_image = np.pad(image, ((0, pad_z), (0, pad_y), (0, pad_x)))
-    print(f"{padded_image.shape=}, {image.shape=}")
     return padded_image
 
 
@@ -71,6 +71,7 @@ def brain_segment(
     padded_image = pad_image(image, SIZE)
     probability_array = np.zeros_like(padded_image, dtype=np.float32)
     sums = np.zeros_like(padded_image)
+    pbar = tqdm()
     # segmenting by patches
     for completion, patches, indexes in gen_patches(
         padded_image, SIZE, OVERLAP, BATCH_SIZE
@@ -86,9 +87,10 @@ def brain_segment(
         for i, ((iz, ez), (iy, ey), (ix, ex)) in enumerate(indexes):
             probability_array[iz:ez, iy:ey, ix:ex] += pred[i, 0]
             sums[iz:ez, iy:ey, ix:ex] += 1
-        print(completion)
-
-    probability_array /= sums
+        pbar.set_postfix(completion=completion * 100)
+        pbar.update()
+    pbar.close()
+    probability_array[:dz, :dy, :dx] /= sums[:dz, :dy, :dx]
     return np.array(probability_array[:dz, :dy, :dx])
 
 
@@ -179,10 +181,7 @@ def main():
     checkpoint = torch.load("weights/weight_026.pt")
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(dev)
-    t0 = time.time()
     probability_array = brain_segment(image, model, dev)
-    t1 = time.time()
-    print(f"\n\nTime: {t1 - t0} seconds\n\n")
     image_save(image, "input.vti")
     image_save(probability_array, "output.vti")
 
