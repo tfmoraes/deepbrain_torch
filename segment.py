@@ -7,8 +7,8 @@ import nibabel as nb
 import numpy as np
 import torch
 import vtk
-from vtk.util import numpy_support
 from tqdm import tqdm, trange
+from vtk.util import numpy_support
 
 from constants import BATCH_SIZE, OVERLAP, SIZE
 from model import Unet3D

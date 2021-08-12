@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm, trange
+from tqdm import trange
 
 from constants import SIZE
 from loss import DiceBCELoss, DiceLoss, TverskyLoss

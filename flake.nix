@@ -32,6 +32,7 @@
         my_python = mach-nix-utils.mkPython {
           requirements = (builtins.readFile ./requirements.txt) + ''
             ipython
+            mypy
           '';
         };
         gpu_libs = with pkgs; [
