@@ -148,6 +148,9 @@ def train():
         dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     model = Unet3D()
+    writer = SummaryWriter()
+    writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE))
+
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model.to(dev)
@@ -156,15 +159,6 @@ def train():
         "datasets/cc359/Original/CC0016_philips_15_55_M.nii.gz"
     ).get_fdata()
 
-    criterion = DiceBCELoss(apply_sigmoid=False)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    if args.continue_train:
-        epoch, model, optimizer, best_loss = load_checkpoint(model, optimizer)
-        start_epoch = epoch + 1
-    else:
-        start_epoch = 0
-        best_loss = 100000
-
     training_files_gen = HDF5Sequence("train_arrays.h5", args.batch_size)
     testing_files_gen = HDF5Sequence("test_arrays.h5", args.batch_size)
     prop_bg, prop_fg = training_files_gen.calc_proportions()
@@ -172,15 +166,20 @@ def train():
 
     print(f"proportion: {prop_fg}, {prop_bg}, {pos_weight}")
 
-    # criterion = nn.BCELoss(weight=torch.from_numpy(np.array((0.1, 0.9))), reduction='mean')
-    # criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
-
-    writer = SummaryWriter()
-    # writer.add_graph(model, torch.randn(1, 1, SIZE, SIZE, SIZE).to(dev))
     print(
         f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {args.batch_size}"
     )
-    # 1/0
+
+    #criterion = DiceBCELoss(apply_sigmoid=False)
+    #criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    if args.continue_train:
+        epoch, model, optimizer, best_loss = load_checkpoint(model, optimizer)
+        start_epoch = epoch + 1
+    else:
+        start_epoch = 0
+        best_loss = 100000
 
     epochs_no_improve = 0
     for epoch in trange(start_epoch, args.epochs):
