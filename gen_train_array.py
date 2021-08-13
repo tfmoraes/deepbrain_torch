@@ -67,8 +67,6 @@ def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
             if _image is None or _mask is None:
                 continue
 
-            patches_added = 0
-
             sz, sy, sx = _image.shape
             patches = list(
                 itertools.product(
@@ -79,6 +77,7 @@ def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
             )
             random.shuffle(patches)
 
+            patches_added = 0
             for patch in patches:
                 sub_mask = get_image_patch(_mask, patch, patch_size)
                 if (sub_mask.sum()) >= (sub_mask.size * 0.1):
@@ -90,6 +89,22 @@ def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
                     patches_files.append(tmp_filename)
                     patches_added += 1
                 if patches_added >= num_patches:
+                    print("> 10%%", patches_added)
+                    break
+
+            patches_added = 0
+            for patch in patches:
+                sub_mask = get_image_patch(_mask, patch, patch_size)
+                if (sub_mask.sum()) < (sub_mask.size * 0.1):
+                    sub_image = get_image_patch(_image, patch, patch_size)
+                    tmp_filename = mktemp(suffix=".npz")
+                    np.savez(tmp_filename, image=sub_image, mask=sub_mask)
+                    del sub_image
+                    del sub_mask
+                    patches_files.append(tmp_filename)
+                    patches_added += 1
+                if patches_added >= int(num_patches * 0.25):
+                    print("< 10%%", patches_added)
                     break
 
     return patches_files
@@ -97,9 +112,9 @@ def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
 
 def gen_all_patches(files):
     patches_files = []
-    with Pool(8) as pool:
+    with Pool(2) as pool:
         for i, image_patches_files in enumerate(pool.imap(gen_image_patches, files)):
-            print(f"{i}/{len(files)}") 
+            print(f"{i}/{len(files)}")
             patches_files.extend(image_patches_files)
     return patches_files
 
