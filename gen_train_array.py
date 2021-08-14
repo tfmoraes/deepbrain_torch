@@ -3,8 +3,10 @@ import os
 import pathlib
 import random
 import sys
-from multiprocessing import Pool
+import math
+import multiprocessing
 from tempfile import mktemp
+import concurrent.futures
 
 import h5py
 import nibabel as nb
@@ -15,6 +17,8 @@ from skimage.transform import resize
 import file_utils
 from constants import BATCH_SIZE, EPOCHS, NUM_PATCHES, OVERLAP, SIZE, STEP_ROT, NUM_ROTS
 from utils import apply_transform, image_normalize
+
+MIRRORING = 2
 
 
 def get_image_patch(image, patch, patch_size):
@@ -28,7 +32,7 @@ def get_image_patch(image, patch, patch_size):
     return sub_image
 
 
-def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
+def gen_image_patches(files, queue, patch_size=SIZE, num_patches=NUM_PATCHES):
     image_filename, mask_filename = files
     original_image = nb.load(str(image_filename)).get_fdata()
     original_mask = nb.load(str(mask_filename)).get_fdata()
@@ -38,7 +42,7 @@ def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
 
     patches_files = []
     # Mirroring
-    for m in range(2):
+    for m in range(MIRRORING):
         if m == 0:
             image = normalized_image.copy()
             mask = normalized_mask.copy()
@@ -78,69 +82,107 @@ def gen_image_patches(files, patch_size=SIZE, num_patches=NUM_PATCHES):
             random.shuffle(patches)
 
             patches_added = 0
+            disponible_patches = []
             for patch in patches:
                 sub_mask = get_image_patch(_mask, patch, patch_size)
                 if (sub_mask.sum()) >= (sub_mask.size * 0.1):
                     sub_image = get_image_patch(_image, patch, patch_size)
-                    tmp_filename = mktemp(suffix=".npz")
-                    np.savez(tmp_filename, image=sub_image, mask=sub_mask)
-                    del sub_image
-                    del sub_mask
-                    patches_files.append(tmp_filename)
+                    queue.put((sub_image, sub_mask))
                     patches_added += 1
-                if patches_added >= num_patches:
+                else:
+                    disponible_patches.append(patch)
+                if patches_added >= math.ceil(num_patches * 0.80):
                     print("> 10%%", patches_added)
                     break
 
-            patches_added = 0
+            patches = disponible_patches
+            disponible_patches = []
             for patch in patches:
                 sub_mask = get_image_patch(_mask, patch, patch_size)
                 if (sub_mask.sum()) < (sub_mask.size * 0.1):
                     sub_image = get_image_patch(_image, patch, patch_size)
-                    tmp_filename = mktemp(suffix=".npz")
-                    np.savez(tmp_filename, image=sub_image, mask=sub_mask)
-                    del sub_image
-                    del sub_mask
-                    patches_files.append(tmp_filename)
+                    queue.put((sub_image, sub_mask))
                     patches_added += 1
-                if patches_added >= int(num_patches * 0.25):
+                else:
+                    disponible_patches.append(patch)
+                if patches_added >= num_patches:
                     print("< 10%%", patches_added)
                     break
+
+            if patches_added < num_patches:
+                for patch in disponible_patches:
+                    sub_mask = get_image_patch(_mask, patch, patch_size)
+                    sub_image = get_image_patch(_image, patch, patch_size)
+                    queue.put((sub_image, sub_mask))
+                    patches_added += 1
+                    if patches_added >= num_patches:
+                        print("outros", patches_added)
+                        break
 
     return patches_files
 
 
 def gen_all_patches(files):
-    patches_files = []
-    with Pool(2) as pool:
-        for i, image_patches_files in enumerate(pool.imap(gen_image_patches, files)):
-            print(f"{i}/{len(files)}")
-            patches_files.extend(image_patches_files)
-    return patches_files
+    m = multiprocessing.Manager()
+    queue = m.Queue(maxsize=10000)
+    total_size = len(files) * NUM_ROTS * MIRRORING * NUM_PATCHES
+    train_size  = int(total_size * 0.8)
+    test_size = total_size - train_size
+    with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
+        f_h5 = executor.submit(h5file_from_patches, train_size, test_size, queue, SIZE)
+        futures = []
+        for image_file, mask_file in files:
+            f = executor.submit(gen_image_patches, (image_file, mask_file), queue, SIZE, NUM_PATCHES)
+            futures.append(f)
+        # futures.append(f_h5)
+        for future in concurrent.futures.as_completed(futures):
+            print(future.result())
+        queue.put(None)
 
 
-def h5file_from_patches(patches_files, filename, patch_size=SIZE):
-    with h5py.File(filename, "w") as f_array:
-        size = len(patches_files)
-        images = f_array.create_dataset(
-            "images", (size, patch_size, patch_size, patch_size, 1), dtype="float32"
-        )
-        masks = f_array.create_dataset(
-            "masks", (size, patch_size, patch_size, patch_size, 1), dtype="float32"
-        )
+def h5file_from_patches(train_size, test_size, queue, patch_size=SIZE):
+    print(train_size, test_size, queue, patch_size)
+    f_train = h5py.File("train_arrays.h5", "w")
+    train_images = f_train.create_dataset(
+        "images", (train_size, patch_size, patch_size, patch_size, 1), dtype="float32"
+    )
+    train_masks = f_train.create_dataset(
+        "masks", (train_size, patch_size, patch_size, patch_size, 1), dtype="float32"
+    )
+    f_train["bg"] = 0
+    f_train["fg"] = 0
+    f_test = h5py.File("test_arrays.h5", "w")
+    test_images = f_test.create_dataset(
+        "images", (test_size, patch_size, patch_size, patch_size, 1), dtype="float32"
+    )
+    test_masks = f_test.create_dataset(
+        "masks", (test_size, patch_size, patch_size, patch_size, 1), dtype="float32"
+    )
+    f_test["bg"] = 0
+    f_test["fg"] = 0
 
-        f_array["bg"] = 0
-        f_array["fg"] = 0
-
-        for n, patch_file in enumerate(patches_files):
-            print("loading", patch_file)
-            arr = np.load(patch_file)
-            images[n] = arr["image"].reshape(patch_size, patch_size, patch_size, 1)
-            masks[n] = arr["mask"].reshape(patch_size, patch_size, patch_size, 1)
-            f_array["bg"][()] += (masks[n] < 0.5).sum()
-            f_array["fg"][()] += (masks[n] >= 0.5).sum()
-            os.remove(patch_file)
-            print(n, size)
+    indexes = [["train", i] for i in range(train_size)] + [["test", i] for i in range(test_size)]
+    random.shuffle(indexes)
+    i = 0
+    while True:
+        print(f"{i}/{train_size + test_size}")
+        value = queue.get()
+        if value is None:
+            break
+        image = value[0].reshape(patch_size, patch_size, patch_size, 1)
+        mask = value[1].reshape(patch_size, patch_size, patch_size, 1)
+        arr, idx = indexes[i]
+        i+=1
+        if arr == "train":
+            train_images[idx] = image
+            train_masks[idx] = mask
+            f_train["bg"][()] += (mask < 0.5).sum()
+            f_train["fg"][()] += (mask >= 0.5).sum()
+        else:
+            test_images[idx] = image
+            test_masks[idx] = mask
+            f_test["bg"][()] += (mask < 0.5).sum()
+            f_test["fg"][()] += (mask >= 0.5).sum()
 
 
 def main():
@@ -152,16 +194,14 @@ def main():
     nfbs_files = file_utils.get_nfbs_filenames(deepbrain_folder)
     files = cc359_files + nfbs_files
 
-    print(files, deepbrain_folder)
-
     patches_files = gen_all_patches(files)
-    random.shuffle(patches_files)
+    # random.shuffle(patches_files)
 
-    training_files = patches_files[: int(len(patches_files) * 0.80)]
-    testing_files = patches_files[int(len(patches_files) * 0.80) :]
+    # training_files = patches_files[: int(len(patches_files) * 0.80)]
+    # testing_files = patches_files[int(len(patches_files) * 0.80) :]
 
-    h5file_from_patches(training_files, "train_arrays.h5")
-    h5file_from_patches(testing_files, "test_arrays.h5")
+    # h5file_from_patches(training_files, "train_arrays.h5")
+    # h5file_from_patches(testing_files, "test_arrays.h5")
 
 
 if __name__ == "__main__":
