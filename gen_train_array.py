@@ -138,6 +138,7 @@ def gen_all_patches(files):
         for future in concurrent.futures.as_completed(futures):
             print(future.result())
         queue.put(None)
+        print(f_h5.result())
 
 
 def h5file_from_patches(train_size, test_size, queue, patch_size=SIZE):
@@ -183,6 +184,12 @@ def h5file_from_patches(train_size, test_size, queue, patch_size=SIZE):
             test_masks[idx] = mask
             f_test["bg"][()] += (mask < 0.5).sum()
             f_test["fg"][()] += (mask >= 0.5).sum()
+
+    f_train["mean"] = np.mean(f_train["images"])
+    f_train["std"] = np.mean(f_train["images"])
+
+    f_test["mean"] = np.mean(f_test["images"])
+    f_test["std"] = np.mean(f_test["images"])
 
 
 def main():
