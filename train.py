@@ -66,6 +66,14 @@ parser.add_argument(
     help="Number of epochs of no improvement to early stop. If 0 then early-stop is not activated.",
     dest="early_stop",
 )
+parser.add_argument(
+    "--patience",
+    default=25,
+    type=int,
+    metavar="N",
+    help="Number of epochs necessary before stop by early stop",
+    dest="patience",
+)
 args, _ = parser.parse_known_args()
 
 
@@ -74,6 +82,8 @@ def save_checkpoint(
     model: nn.Module,
     optimizer: optim.Optimizer,
     best_loss: float,
+    mean: float,
+    std: float,
     is_best: bool = False,
 ):
     checkpoint = {
@@ -81,6 +91,8 @@ def save_checkpoint(
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "best_loss": best_loss,
+        "mean": mean,
+        "std": std,
     }
     f_path = pathlib.Path("checkpoints/checkpoint.pt").resolve()
     f_path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,8 +128,8 @@ class HDF5Sequence:
         self.f_array = h5py.File(filename, "r")
         self.x = self.f_array["images"]
         self.y = self.f_array["masks"]
-        self.mean = self.f_array["mean"][()]
-        self.std = self.f_array["std"][()]
+        self.mean = float(self.f_array["mean"][()])
+        self.std = float(self.f_array["std"][()])
         self.batch_size = batch_size
 
     def calc_proportions(self) -> typing.Tuple[float, float]:
@@ -174,8 +186,8 @@ def train():
         f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {args.batch_size}"
     )
 
-    #criterion = DiceBCELoss(apply_sigmoid=False)
-    #criterion = nn.BCELoss()
+    # criterion = DiceBCELoss(apply_sigmoid=False)
+    # criterion = nn.BCELoss()
     criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
     if args.continue_train:
@@ -247,11 +259,17 @@ def train():
             epochs_no_improve += 1
 
         save_checkpoint(
-            epoch, model, optimizer, best_loss, is_best=actual_loss == best_loss
+            epoch,
+            model,
+            optimizer,
+            best_loss,
+            mean,
+            std,
+            is_best=actual_loss == best_loss,
         )
 
-        if args.early_stop > 0 and epochs_no_improve == args.early_stop:
-            print("Early-stop!")
+        if epoch >= args.patience and args.early_stop > 0 and epochs_no_improve == args.early_stop:
+            print("Early-top!")
             break
 
     writer.flush()
