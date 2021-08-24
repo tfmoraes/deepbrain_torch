@@ -116,6 +116,8 @@ class HDF5Sequence:
         self.f_array = h5py.File(filename, "r")
         self.x = self.f_array["images"]
         self.y = self.f_array["masks"]
+        self.mean = self.f_array["mean"][()]
+        self.std = self.f_array["std"][()]
         self.batch_size = batch_size
 
     def calc_proportions(self) -> typing.Tuple[float, float]:
@@ -161,6 +163,8 @@ def train():
 
     training_files_gen = HDF5Sequence("train_arrays.h5", args.batch_size)
     testing_files_gen = HDF5Sequence("test_arrays.h5", args.batch_size)
+    mean = training_files_gen.mean
+    std = training_files_gen.std
     prop_bg, prop_fg = training_files_gen.calc_proportions()
     pos_weight = prop_fg / prop_bg
 
@@ -200,6 +204,7 @@ def train():
                 t = trange(len(testing_files_gen))
 
             for i, (x, y_true) in zip(t, training_files_gen):
+                x = (x - mean) / std
                 x = torch.from_numpy(x).to(dev)
                 y_true = torch.from_numpy(y_true).to(dev)
                 optimizer.zero_grad()
@@ -219,7 +224,7 @@ def train():
                         optimizer.step()
 
         dz, dy, dx = image_test.shape
-        output_test = brain_segment(image_test, model, dev)
+        output_test = brain_segment(image_test, model, dev, mean, std)
         print("Min max", output_test.min(), output_test.max())
         output_test = (output_test > 0.75) * 1.0
 

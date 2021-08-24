@@ -7,7 +7,7 @@
       url = "github:numtide/flake-utils";
     };
     pypi-deps-db = {
-      url = "github:DavHau/pypi-deps-db/690fd7b0505ca6c962f5c4b8336d76215de7bb43";
+      url = "github:DavHau/pypi-deps-db/21cb3e237804c7c43dc209fe5bfab9101e55582a";
       flake = false;
     };
     mach-nix = {
@@ -21,7 +21,7 @@
   outputs = { self, nixpkgs, flake-utils, mach-nix, pypi-deps-db }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
-        pkgs = import nixpkgs { 
+        pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
         };
@@ -50,7 +50,7 @@
           nativeBuildInputs = with pkgs; [
             wrapGAppsHook
           ];
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath ( gpu_libs ++ [ "/run/opengl-driver/" ]) ;
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (gpu_libs ++ [ "/run/opengl-driver/" ]);
         };
       });
 }

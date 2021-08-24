@@ -1,9 +1,9 @@
+import argparse
 import itertools
+import pathlib
 import sys
 import time
 import typing
-import argparse
-import pathlib
 
 import nibabel as nb
 import numpy as np
@@ -51,7 +51,6 @@ parser.add_argument(
     help="Which device to use: cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan",
     dest="device",
 )
-
 
 
 def image_normalize(
@@ -104,11 +103,16 @@ def pad_image(image: np.ndarray, patch_size: int = SIZE) -> np.ndarray:
 
 
 def brain_segment(
-    image: np.ndarray, model: torch.nn.Module, dev: torch.device
+    image: np.ndarray,
+    model: torch.nn.Module,
+    dev: torch.device,
+    mean: float,
+    std: float,
 ) -> np.ndarray:
     dz, dy, dx = image.shape
     image = image_normalize(image, 0.0, 1.0, output_dtype=np.float32)
     padded_image = pad_image(image, SIZE)
+    padded_image = (padded_image - mean) / std
     probability_array = np.zeros_like(padded_image, dtype=np.float32)
     sums = np.zeros_like(padded_image)
     pbar = tqdm()
@@ -226,13 +230,19 @@ def main():
     model = Unet3D()
     checkpoint = torch.load(weights_file)
     try:
-        model.load_state_dict(checkpoint["model_state_dict"])
+        try:
+            model.load_state_dict(checkpoint["model_state_dict"])
+        except RuntimeError:
+            dmodel = torch.nn.DataParallel(model)
+            dmodel.load_state_dict(checkpoint["model_state_dict"])
+            model = dmodel.module
     except TypeError:
         model = checkpoint
         if isinstance(model, torch.nn.DataParallel):
             model = model.module
     model = model.to(dev)
-    probability_array = brain_segment(image, model, dev)
+    #probability_array = brain_segment(image, model, dev, 0.0, 1.0)
+    probability_array = brain_segment(image, model, dev, 0.15134051, 0.13017626)
     image_save(probability_array, str(output_file))
 
 
