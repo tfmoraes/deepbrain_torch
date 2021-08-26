@@ -244,7 +244,7 @@ def main():
         model = checkpoint
         if isinstance(model, torch.nn.DataParallel):
             model = model.module
-    print(f"{mean=}, {std=}")
+    print(f"mean={mean}, std={std}")
     model = model.to(dev)
     #probability_array = brain_segment(image, model, dev, 0.0, 1.0)
     probability_array = brain_segment(image, model, dev, mean, std)
