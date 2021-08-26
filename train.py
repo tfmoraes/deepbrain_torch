@@ -175,8 +175,10 @@ def train():
 
     training_files_gen = HDF5Sequence("train_arrays.h5", args.batch_size)
     testing_files_gen = HDF5Sequence("test_arrays.h5", args.batch_size)
-    mean = training_files_gen.mean
-    std = training_files_gen.std
+    #mean = training_files_gen.mean
+    #std = training_files_gen.std
+    mean = 0.0
+    std = 1.0
     prop_bg, prop_fg = training_files_gen.calc_proportions()
     pos_weight = prop_fg / prop_bg
 
@@ -186,9 +188,9 @@ def train():
         f"{len(training_files_gen)}, {training_files_gen.x.shape[0]}, {args.batch_size}"
     )
 
-    # criterion = DiceBCELoss(apply_sigmoid=False)
+    criterion = DiceLoss(apply_sigmoid=False)
     # criterion = nn.BCELoss()
-    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
+    # criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(dev))
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
     if args.continue_train:
         epoch, model, optimizer, best_loss = load_checkpoint(model, optimizer)

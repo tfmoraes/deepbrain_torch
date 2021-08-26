@@ -227,6 +227,8 @@ def main():
         dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     nii_data = nb.load(str(input_file))
     image = nii_data.get_fdata()
+    mean = 0.0
+    std = 1.0
     model = Unet3D()
     checkpoint = torch.load(weights_file)
     try:
@@ -236,13 +238,16 @@ def main():
             dmodel = torch.nn.DataParallel(model)
             dmodel.load_state_dict(checkpoint["model_state_dict"])
             model = dmodel.module
+        mean = checkpoint["mean"]
+        std = checkpoint["std"]
     except TypeError:
         model = checkpoint
         if isinstance(model, torch.nn.DataParallel):
             model = model.module
+    print(f"{mean=}, {std=}")
     model = model.to(dev)
     #probability_array = brain_segment(image, model, dev, 0.0, 1.0)
-    probability_array = brain_segment(image, model, dev, 0.15134051, 0.13017626)
+    probability_array = brain_segment(image, model, dev, mean, std)
     image_save(probability_array, str(output_file))
 
 

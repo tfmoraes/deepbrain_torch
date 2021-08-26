@@ -7,8 +7,7 @@
       url = "github:numtide/flake-utils";
     };
     pypi-deps-db = {
-      url = "github:DavHau/pypi-deps-db/21cb3e237804c7c43dc209fe5bfab9101e55582a";
-      flake = false;
+      url = "github:DavHau/pypi-deps-db/88bf60ae6deea164f7bad99ed30069ac3c911a05";
     };
     mach-nix = {
       url = github:DavHau/mach-nix;
@@ -27,12 +26,16 @@
         };
         mach-nix-utils = import mach-nix {
           inherit pkgs;
+          pypiDataRev = pypi-deps-db.rev;
+          pypiDataSha256 = pypi-deps-db.narHash;
         };
 
         my_python = mach-nix-utils.mkPython {
           requirements = (builtins.readFile ./requirements.txt) + ''
             ipython
             mypy
+            setuptools_rust
+            cffi
           '';
         };
         gpu_libs = with pkgs; [
