@@ -51,6 +51,18 @@ parser.add_argument(
     help="Which device to use: cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan",
     dest="device",
 )
+parser.add_argument(
+    "--ww",
+    default=None,
+    type=int,
+    dest="window_width"
+)
+parser.add_argument(
+    "--wl",
+    default=None,
+    type=int,
+    dest="window_level"
+)
 
 
 def image_normalize(
@@ -63,6 +75,21 @@ def image_normalize(
     imin, imax = image.min(), image.max()
     output[:] = (image - imin) * ((max_ - min_) / (imax - imin)) + min_
     return output
+
+
+def get_LUT_value_255(image: np.ndarray, window: int, level: int) -> np.ndarray:
+    shape = image.shape
+    data_ = image.ravel()
+    image = np.piecewise(
+        data_,
+        [
+            data_ <= (level - 0.5 - (window - 1) / 2),
+            data_ > (level - 0.5 + (window - 1) / 2),
+        ],
+        [0, 255, lambda data_: ((data_ - (level - 0.5)) / (window - 1) + 0.5) * (255)],
+    )
+    image.shape = shape
+    return image
 
 
 def gen_patches(
@@ -244,8 +271,14 @@ def main():
         model = checkpoint
         if isinstance(model, torch.nn.DataParallel):
             model = model.module
-    print(f"mean={mean}, std={std}")
+    print(f"mean={mean}, std={std}, {image.min()=}, {image.max()=}, {args.window_width=}, {args.window_level=}")
     model = model.to(dev)
+    model.eval()
+
+    if args.window_width is not None and args.window_level is not None:
+        image = get_LUT_value_255(image, args.window_width, args.window_level)
+        print("ww wl", image.min(), image.max())
+
     #probability_array = brain_segment(image, model, dev, 0.0, 1.0)
     probability_array = brain_segment(image, model, dev, mean, std)
     image_save(probability_array, str(output_file))

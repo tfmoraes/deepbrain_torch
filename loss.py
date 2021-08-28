@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 ALPHA = 0.5
 BETA = 0.5
+GAMMA = 2.0
 
 
 class DiceLoss(nn.Module):
@@ -78,6 +79,42 @@ class IoULoss(nn.Module):
         return 1 - IoU
 
 
+class FocalLoss(nn.Module):
+    # Focal Loss was introduced by Lin et al of Facebook AI Research in 2017 as
+    # a means of combatting extremely imbalanced datasets where positive cases
+    # were relatively rare. Their paper "Focal Loss for Dense Object Detection"
+    # is retrievable here: https://arxiv.org/abs/1708.02002. In practice, the
+    # researchers used an alpha-modified version of the function so I have
+    # included it in this implementation.
+    def __init__(
+        self,
+        apply_sigmoid: bool = False,
+        smooth: float = 1.0,
+        alpha: float = ALPHA,
+        gamma: float = GAMMA,
+    ):
+        super(FocalLoss, self).__init__()
+        self.apply_sigmoid = apply_sigmoid
+        self.smooth = smooth
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, y_pred, y_true):
+        if self.apply_sigmoid:
+            y_pred = F.sigmoid(y_pred)
+
+        # flatten label and prediction tensors
+        y_pred = y_pred.view(-1)
+        y_true = y_true.view(-1)
+
+        # first compute binary cross-entropy
+        BCE = F.binary_cross_entropy(y_pred, y_true, reduction="mean")
+        BCE_EXP = torch.exp(-BCE)
+        focal_loss = self.alpha * (1.0 - BCE_EXP) ** self.gamma * BCE
+
+        return focal_loss
+
+
 class TverskyLoss(nn.Module):
     # This loss was introduced in "Tversky loss function for image
     # segmentation using 3D fully convolutional deep networks", retrievable here:
@@ -94,18 +131,25 @@ class TverskyLoss(nn.Module):
     # value is increased. The beta constant in particular has applications in
     # situations where models can obtain misleadingly positive performance via
     # highly conservative prediction. You may want to experiment with different
-    # values to find the optimum. With alpha==beta==0.5, this loss becomes equivalent to Dice Loss.
-    def __init__(self, smooth: float = 1.0, apply_sigmoid: bool = False):
+    # values to find the optimum. With alpha==beta==0.5, this loss becomes
+    # equivalent to Dice Loss.
+    def __init__(
+        self,
+        smooth: float = 1.0,
+        apply_sigmoid: bool = False,
+        alpha: float = ALPHA,
+        beta: float = BETA,
+    ):
         super().__init__()
         self.smooth = smooth
         self.apply_sigmoid = apply_sigmoid
+        self.alpha = alpha
+        self.beta = beta
 
     def forward(
         self,
         y_pred: torch.Tensor,
         y_true: torch.Tensor,
-        alpha: float = ALPHA,
-        beta: float = BETA,
     ) -> torch.Tensor:
         if self.apply_sigmoid:
             y_pred = torch.sigmoid(y_pred)
@@ -118,6 +162,8 @@ class TverskyLoss(nn.Module):
         FP = ((1 - y_true) * y_pred).sum()
         FN = (y_true * (1 - y_pred)).sum()
 
-        tversky = (TP + self.smooth) / (TP + alpha * FP + beta * FN + self.smooth)
+        tversky = (TP + self.smooth) / (
+            TP + self.alpha * FP + self.beta * FN + self.smooth
+        )
 
         return 1 - tversky
