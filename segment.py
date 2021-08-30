@@ -63,6 +63,13 @@ parser.add_argument(
     type=int,
     dest="window_level"
 )
+parser.add_argument(
+    "-b",
+    "--batch_size",
+    default=BATCH_SIZE,
+    type=int,
+    dest="batch_size"
+)
 
 
 def image_normalize(
@@ -135,6 +142,7 @@ def brain_segment(
     dev: torch.device,
     mean: float,
     std: float,
+    batch_size: int = BATCH_SIZE
 ) -> np.ndarray:
     dz, dy, dx = image.shape
     image = image_normalize(image, 0.0, 1.0, output_dtype=np.float32)
@@ -145,7 +153,7 @@ def brain_segment(
     pbar = tqdm()
     # segmenting by patches
     for completion, patches, indexes in gen_patches(
-        padded_image, SIZE, OVERLAP, BATCH_SIZE
+        padded_image, SIZE, OVERLAP, batch_size
     ):
         with torch.no_grad():
             pred = (
@@ -280,7 +288,7 @@ def main():
         print("ww wl", image.min(), image.max())
 
     #probability_array = brain_segment(image, model, dev, 0.0, 1.0)
-    probability_array = brain_segment(image, model, dev, mean, std)
+    probability_array = brain_segment(image, model, dev, mean, std, args.batch_size)
     image_save(probability_array, str(output_file))
 
 
