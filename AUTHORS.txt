@@ -1,0 +1,3 @@
+Authors ordered by first contribution.
+
+Thiago Franco de Moraes <totonixsame@gmail.com>
