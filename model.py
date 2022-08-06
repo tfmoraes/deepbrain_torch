@@ -2,7 +2,6 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-import torchviz
 
 from constants import SIZE
 
@@ -133,6 +132,7 @@ class Unet3D(nn.Module):
 
 
 def main():
+    import torchviz
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = Unet3D()
     model.to(dev)
